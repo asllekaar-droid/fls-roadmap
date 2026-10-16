@@ -133,20 +133,20 @@ class Canvas:
         # All rows constrained to the safe inner rectangle of the circle.
         title=title or f"{item['kind']} Q{q}" if q else title or f"{item['kind']} X = 0"
         label=item['s'] or ('NEXT' if item.get('next_only') else 'CONTEXT')
-        start=item['start'];hours={'MC':168,'WC':24,'DC':6}[item['kind']]
+        start=item['start'];hours={'MC':168,'WC':24,'DC':6,'3M':0}[item['kind']]
         if r>220:
             lines=[(title,34,col,True),(label,52,col,True),
                    (' + '.join(map(str,item['values']))+' = '+str(sum(item['values'])),26,NAVY,False),
                    (f"SSMT {item['kind']}" if item['s'] else 'TIME CONTEXT',24,NAVY,True),
                    (pair(q) if item['s'] else (extra or ''),21,NAVY,False),
-                   (fmt(start),22,NAVY,False),(fmt(start+timedelta(hours=hours)),22,NAVY,False)]
+                   (fmt(start),22,NAVY,False),(fmt(item.get('end',start+timedelta(hours=hours))),22,NAVY,False)]
             offsets=[-143,-87,-12,40,85,130,163]
         else:
             lines=[(title,31,col,True),(label,34,col,True),
                    (' + '.join(map(str,item['values']))+' = '+str(sum(item['values'])),22,NAVY,False),
-                   (f"SSMT {item['kind']}" if item['s'] or item.get('next_only') else '90m CONTEXT',20,NAVY,True),
+                   (f"SSMT {item['kind']}" if item['s'] or item.get('next_only') else ('90m CONTEXT' if item['kind']=='DC' else 'WC CONTEXT'),20,NAVY,True),
                    (pair(q) if item['s'] else (f'(Q{q-1}~Q{q})' if item.get('next_only') and q>1 else '(prev Q4~Q1)' if item.get('next_only') else ''),16,NAVY,False),
-                   (fmt(start),18,NAVY,False),(fmt(start+timedelta(hours=hours)),18,NAVY,False)]
+                   (fmt(start),18,NAVY,False),(fmt(item.get('end',start+timedelta(hours=hours))),18,NAVY,False)]
             offsets=[-110,-64,-15,24,58,88,115]
         for (t,s,c,b),off in zip(lines,offsets):
             # Fit line to circle chord at its lowest glyph edge, with margin.
@@ -249,6 +249,63 @@ def weekly(day,path):
     c.save(path)
 
 
+
+def monthly(day,path):
+    anchor=month_anchor(day)
+    if anchor.date()<day:
+        nxt=(day.replace(day=28)+timedelta(days=4)).replace(day=1)
+        anchor=month_anchor(nxt)
+    groups=[]
+    for mq in range(1,5):
+        ms=anchor+timedelta(weeks=mq-1)
+        mc=state('MC',ms)
+        next_month=(ms.date().replace(day=28)+timedelta(days=4)).replace(day=1)
+        mc['end']=min(ms+timedelta(days=7),at(next_month,0))
+        # A short month can truncate its last nominal week; evaluate actual time states.
+        wc_hits=[]
+        week_start=ms.date()
+        prev=None
+        for i in range(7):
+            ws=at(week_start+timedelta(days=i));wc=state('WC',ws)
+            if ws>=mc['end']:
+                continue
+            if ws.weekday() in (4,5):
+                continue
+            if wc['s']:
+                wc_hits.append(wc)
+            prev=wc
+        groups.append((mc,wc_hits))
+    root=state('3M',anchor)
+    quarter_start=date(anchor.year,3*((anchor.month-1)//3)+1,1)
+    root['start']=at(quarter_start,0)
+    endmonth=quarter_start.month+3
+    root['end']=at(date(quarter_start.year+(endmonth>12),(endmonth-1)%12+1,1),0)
+    heights=[max(355,len(hits)*205+60) for _,hits in groups]
+    height=570+sum(heights)
+    c=Canvas(height)
+    c.header('MONTHLY ROADMAP / '+anchor.strftime('%B %Y').upper(),'NEW YORK | 3MONTHS / YEARLY → MC → IMPORTANT WC + NEXT WC')
+    c.text(100,265,'MC anchor retained: first Monday 18:00. Dates below use actual WC starts.',22,MUTED)
+    c.circle(350,height//2,245,root,title=f"Yearly / 3M Q{root['q']}")
+    y=370
+    for (mc,hits),rh in zip(groups,heights):
+        cy=y+rh/2
+        c.arrow([(595,height//2),(660,height//2),(660,cy),(752,cy)])
+        c.circle(920,cy,168,mc)
+        if not hits:
+            c.text(1250,cy,'No primary S3 / S6 / S9 WC in this MC week.',25,MUTED)
+        for i,wc in enumerate(hits):
+            sy=cy-len(hits)*205/2+i*205
+            st=wc['start'];en=st+timedelta(days=1);ne=en+timedelta(days=1);q=wc['q'];nq=q+1 if q<4 else 0
+            dayname=(st.date()+timedelta(days=1)).strftime('%a')
+            c.arrow([(1088,cy),(1170,cy),(1170,sy+80),(1240,sy+80)])
+            left=f'Q{q-1}' if q>1 else 'prev X'
+            c.card(1240,sy,680,[f"{dayname} / WC Q{q} / {wc['s']}",f'SSMT WC ({left}~Q{q})',fmt(st)+' – '+fmt(en),' + '.join(map(str,wc['values']))+' = '+str(sum(wc['values']))],q)
+            c.arrow([(1920,sy+80),(1998,sy+80)])
+            nlabel=f'Q{nq}' if nq else 'X = 0'
+            c.card(2000,sy,680,[f'WC {nlabel} / NEXT',f'SSMT WC (Q{q}~{nlabel})',fmt(en)+' – '+fmt(ne),''],nq)
+        y+=rh
+    c.save(path)
+
 def send(path,caption):
     import requests
     token=os.environ.get('TELEGRAM_BOT_TOKEN');chat=os.environ.get('TELEGRAM_CHAT_ID')
@@ -262,21 +319,18 @@ def send(path,caption):
         if not response.json().get('ok'):
             raise SystemExit('Telegram did not confirm delivery.')
     except requests.RequestException as error:
-        raise SystemExit(
-            f'Telegram connection error: {type(error).__name__}. '
-            'Check the channel before retrying to avoid duplicate delivery.'
-        ) from None
+        raise SystemExit(f'Telegram connection error: {type(error).__name__}. Check the channel before retrying.') from None
     print('Photo delivered successfully.')
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--mode',choices=['auto','daily','weekly'],default='auto');parser.add_argument('--date');parser.add_argument('--send',action='store_true');parser.add_argument('--output-dir',default='output');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--mode',choices=['auto','daily','weekly','monthly'],default='auto');parser.add_argument('--date');parser.add_argument('--send',action='store_true');parser.add_argument('--output-dir',default='output');args=parser.parse_args()
     day=date.fromisoformat(args.date) if args.date else datetime.now(TEHRAN).date()
     mode=('weekly' if day.weekday()==5 else 'daily') if args.mode=='auto' else args.mode
     if mode=='daily' and day.weekday()>=5:
         print('Weekend: no regular futures trading day; no daily photo sent.');return
     out=Path(args.output_dir);out.mkdir(parents=True,exist_ok=True);path=out/f'FLS_{mode}_{day.isoformat()}.png'
-    (weekly if mode=='weekly' else daily)(day,path)
+    {'weekly':weekly,'daily':daily,'monthly':monthly}[mode](day,path)
     print('Generated:',path)
     if args.send:send(path,f'FLS.TRADE | QT {mode.upper()} | {day.isoformat()}\nAll times: New York. Timing model / SSMT observation windows.')
 
