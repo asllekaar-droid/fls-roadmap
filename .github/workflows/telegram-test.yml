@@ -1,0 +1,43 @@
+name: Telegram Test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  send-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send test message
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+
+          token = os.environ["BOT_TOKEN"]
+          payload = {
+              "chat_id": os.environ["CHAT_ID"],
+              "text": "✅ FLS Assistant متصل شد.\nتست ارسال گزارش‌های QT."
+          }
+          request = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"}
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.load(response)
+              if not result.get("ok"):
+                  raise SystemExit("Telegram rejected the message.")
+              print("Test message sent successfully.")
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f"Telegram HTTP error: {error.code}")
+          except urllib.error.URLError:
+              raise SystemExit("Could not connect to Telegram.")
+          PY
