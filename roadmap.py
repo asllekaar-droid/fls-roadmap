@@ -261,8 +261,11 @@ def send(path,caption):
             raise SystemExit(f'Telegram rejected photo (HTTP {response.status_code}). Check channel and permissions.')
         if not response.json().get('ok'):
             raise SystemExit('Telegram did not confirm delivery.')
-    except requests.RequestException:
-        raise SystemExit('Telegram connection failed. Check the channel before retrying to avoid duplicate delivery.') from None
+    except requests.RequestException as error:
+        raise SystemExit(
+            f'Telegram connection error: {type(error).__name__}. '
+            'Check the channel before retrying to avoid duplicate delivery.'
+        ) from None
     print('Photo delivered successfully.')
 
 
