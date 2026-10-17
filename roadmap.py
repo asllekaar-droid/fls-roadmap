@@ -162,10 +162,8 @@ def roadmap_caption(mode, day):
             previous = wc
         attention = ('کاندیدهای تشکیل سقف یا کف (MC):\n' + ' | '.join(candidates)
                      if candidates else 'در سطح (WC)، کاندیدی از نظر SXn مشخص نشده است.')
-        body = ['توجه — نقشهٔ هفتگی', context_sentence(mc, 'ماه'), attention,
+        body = ['توجه — برنامه زمانی هفتگی', context_sentence(mc, 'ماه'), attention,
                 'داخل هر (WC)، کوارترهای مشخص‌شدهٔ (DC) را برای تشکیل سقف و کف همان (WC) زیر نظر بگیر.']
-        if quarters(start)['MC'] != mc['q']:
-            body.append('تغییر (MC) در دوشنبه ساعت ۱۸ نیویورک انجام می‌شود؛ زمینهٔ یکشنبه جداست.')
     else:
         anchor = month_anchor(day)
         if anchor.date() < day:
