@@ -129,7 +129,13 @@ class Canvas:
         q=item['q'];col=COLORS[q]
         self.d.ellipse((x-r+6,y-r+10,x+r+6,y+r+10),fill='#DFEAEE')
         self.d.ellipse((x-r,y-r,x+r,y+r),fill='#F8FCFD',outline='white',width=8)
-        self.d.arc((x-r+10,y-r+10,x+r-10,y+r-10),275,440,fill=col,width=4)
+        # Only primary S-Class and the following observation window get an arc.
+        previous = state(item['kind'], item['start'] - timedelta(seconds=1))
+        next_only = bool(item.get('next_only') or
+                         (previous['s'] and previous['q'] != q))
+        item = dict(item, next_only=next_only)
+        if item['s'] in ('S3', 'S6', 'S9') or next_only:
+            self.d.arc((x-r+10,y-r+10,x+r-10,y+r-10),275,440,fill=col,width=4)
         # All rows constrained to the safe inner rectangle of the circle.
         title=title or f"{item['kind']} Q{q}" if q else title or f"{item['kind']} X = 0"
         label=item['s'] or ('NEXT' if item.get('next_only') else 'CONTEXT')
