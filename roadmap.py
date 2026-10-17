@@ -100,6 +100,92 @@ def pair(q):
     return f'({left}~Q{q}) + (Q{q}~{right})'
 
 
+def window_status(item):
+    if item['s'] in ('S3', 'S6', 'S9'):
+        return 'primary'
+    previous = state(item['kind'], item['start'] - timedelta(seconds=1))
+    if item.get('next_only') or (previous['s'] and previous['q'] != item['q']):
+        return 'next'
+    return ''
+
+
+def cycle_label(item):
+    return item['kind'] + (' Q' + str(item['q']) if item['q'] else ' X')
+
+
+def mc_context(st):
+    item = state('MC', st)
+    if item['q']:
+        item['start'] = month_anchor(st.date()) + timedelta(weeks=item['q'] - 1)
+    else:
+        anchor = month_anchor(st.date())
+        # X starts either at the month boundary or after the fourth MC week.
+        item['start'] = (at(st.date().replace(day=1), 0) if st < anchor
+                         else anchor + timedelta(weeks=4))
+    return item
+
+
+def context_sentence(item, parent):
+    name = '(' + cycle_label(item) + ')'
+    if item['s'] in ('S3', 'S6', 'S9'):
+        return f'چرخهٔ {name} از نظر SXn مهم است؛ کاندید تشکیل سقف یا کف {parent} است.'
+    return f'چرخهٔ {name} از نظر SXn مهم نیست؛ در این نقشه کاندید تشکیل سقف و کف {parent} نیست.'
+
+
+def roadmap_caption(mode, day):
+    weekdays = ['دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه', 'یکشنبه']
+    closing = 'زمان مشخص است؛ برای استفاده باید با سطوح کلیدی و پروفایل QT ترکیب شود.'
+    if mode == 'daily':
+        root, rows = day_data(day)
+        mc = mc_context(root['start'])
+        if not mc['s'] and not root['s']:
+            context = ('چرخه‌های (MC) و (WC) از نظر SXn مهم نیستند؛ بنابراین در این نقشه، '
+                       '(MC) کاندید تشکیل سقف و کف ماه و (WC) کاندید تشکیل سقف و کف (MC) نیست.')
+        else:
+            context = context_sentence(mc, 'ماه') + '\n' + context_sentence(root, '(MC)')
+        candidates = [cycle_label(row) for row in rows if window_status(row)]
+        attention = ('کاندیدهای تشکیل سقف یا کف روز:\n' + ' | '.join(candidates)
+                     if candidates else 'در سطح (DC)، کاندیدی از نظر SXn مشخص نشده است.')
+        body = [f'توجه — چرخهٔ روز {weekdays[day.weekday()]}', context, attention,
+                'داخل هر (DC)، کوارترهای مشخص‌شدهٔ ۹۰ دقیقه‌ای را برای تشکیل سقف و کف همان (DC) زیر نظر بگیر.']
+    elif mode == 'weekly':
+        sunday = day + timedelta(days=(6-day.weekday()) % 7)
+        start = at(sunday)
+        mc = mc_context(start + timedelta(days=1))
+        candidates = []
+        previous = state('WC', start - timedelta(days=3))
+        for i in range(5):
+            wc = state('WC', start + timedelta(days=i))
+            wc['next_only'] = bool(previous['s']) and not wc['s']
+            if window_status(wc):
+                candidates.append(cycle_label(wc))
+            previous = wc
+        attention = ('کاندیدهای تشکیل سقف یا کف (MC):\n' + ' | '.join(candidates)
+                     if candidates else 'در سطح (WC)، کاندیدی از نظر SXn مشخص نشده است.')
+        body = ['توجه — نقشهٔ هفتگی', context_sentence(mc, 'ماه'), attention,
+                'داخل هر (WC)، کوارترهای مشخص‌شدهٔ (DC) را برای تشکیل سقف و کف همان (WC) زیر نظر بگیر.']
+        if quarters(start)['MC'] != mc['q']:
+            body.append('تغییر (MC) در دوشنبه ساعت ۱۸ نیویورک انجام می‌شود؛ زمینهٔ یکشنبه جداست.')
+    else:
+        anchor = month_anchor(day)
+        if anchor.date() < day:
+            anchor = month_anchor((day.replace(day=28) + timedelta(days=4)).replace(day=1))
+        yearly = state('3M', anchor)
+        yearly['start'] = at(date(anchor.year, ((anchor.month-1)//3)*3+1, 1), 0)
+        candidates = [mc_context(anchor + timedelta(weeks=i)) for i in range(4)]
+        candidates = [cycle_label(item) for item in candidates if window_status(item)]
+        context = ('چرخهٔ سه‌ماهه (Yearly / 3Months) از نظر SXn مهم است.' if yearly['s']
+                   else 'چرخهٔ سه‌ماهه (Yearly / 3Months) از نظر SXn مهم نیست.')
+        attention = ('کاندیدهای تشکیل سقف یا کف ماه:\n' + ' | '.join(candidates)
+                     if candidates else 'در سطح (MC)، کاندیدی از نظر SXn مشخص نشده است.')
+        body = ['توجه — نقشهٔ سه‌ماهه و ماهانه', context, attention,
+                'داخل هر (MC)، کوارترهای مشخص‌شدهٔ (WC) را برای تشکیل سقف و کف همان (MC) زیر نظر بگیر.']
+    caption = '\n\n'.join(body + [closing, 'همهٔ ساعت‌های تصویر به وقت نیویورک است.'])
+    if len(caption.encode('utf-16-le')) // 2 > 1024:
+        raise ValueError('Roadmap caption exceeds Telegram photo caption limit.')
+    return caption
+
+
 class Canvas:
     def __init__(self, height):
         from PIL import Image,ImageDraw,ImageFont,ImageFilter
@@ -130,11 +216,9 @@ class Canvas:
         self.d.ellipse((x-r+6,y-r+10,x+r+6,y+r+10),fill='#DFEAEE')
         self.d.ellipse((x-r,y-r,x+r,y+r),fill='#F8FCFD',outline='white',width=8)
         # Only primary S-Class and the following observation window get an arc.
-        previous = state(item['kind'], item['start'] - timedelta(seconds=1))
-        next_only = bool(item.get('next_only') or
-                         (previous['s'] and previous['q'] != q))
-        item = dict(item, next_only=next_only)
-        if item['s'] in ('S3', 'S6', 'S9') or next_only:
+        status = window_status(item)
+        item = dict(item, next_only=(status == 'next'))
+        if status:
             self.d.arc((x-r+10,y-r+10,x+r-10,y+r-10),275,440,fill=col,width=4)
         # All rows constrained to the safe inner rectangle of the circle.
         title=title or f"{item['kind']} Q{q}" if q else title or f"{item['kind']} X = 0"
@@ -338,6 +422,7 @@ def main():
     out=Path(args.output_dir);out.mkdir(parents=True,exist_ok=True);path=out/f'FLS_{mode}_{day.isoformat()}.png'
     {'weekly':weekly,'daily':daily,'monthly':monthly}[mode](day,path)
     print('Generated:',path)
-    if args.send:send(path,f'FLS.TRADE | QT {mode.upper()} | {day.isoformat()}\nAll times: New York. Timing model / SSMT observation windows.')
+    if args.send:send(path,roadmap_caption(mode,day))
 
 if __name__=='__main__':main()
+
