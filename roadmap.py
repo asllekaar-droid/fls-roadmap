@@ -417,10 +417,13 @@ def send(path,caption):
         message=payload.get('result',{})
         if message.get('chat',{}).get('id') != target['id'] or not message.get('message_id'):
             raise SystemExit('Telegram response did not verify the intended channel and message.')
+        if not message.get('photo') or message.get('caption') != caption:
+            raise SystemExit('Telegram did not confirm the image and full caption together.')
         print(f"Verified Telegram channel: {target['id']}; message_id: {message['message_id']}")
     except requests.RequestException as error:
         raise SystemExit(f'Telegram connection error: {type(error).__name__}. Check the channel before retrying.') from None
     print('Photo delivered successfully.')
+    return {'chat_id': target['id'], 'message_id': message['message_id']}
 
 
 def main():
@@ -432,7 +435,9 @@ def main():
     out=Path(args.output_dir);out.mkdir(parents=True,exist_ok=True);path=out/f'FLS_{mode}_{day.isoformat()}.png'
     {'weekly':weekly,'daily':daily,'monthly':monthly}[mode](day,path)
     print('Generated:',path)
-    if args.send:send(path,roadmap_caption(mode,day))
+    if args.send:
+        from delivery import deliver
+        deliver(path,roadmap_caption(mode,day),send)
 
 if __name__=='__main__':main()
 

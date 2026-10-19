@@ -10,6 +10,11 @@ on:
     # New York Monday-Thursday 15:00: next day's WC Q2/Q3/Q4/X.
     - cron: '0 19 * * 1-4'
     - cron: '0 20 * * 1-4'
+    # Verify the same report set 15 minutes later; recover missing deliveries.
+    - cron: '15 4 * * *'
+    - cron: '15 5 * * *'
+    - cron: '15 19 * * 1-4'
+    - cron: '15 20 * * 1-4'
   workflow_dispatch:
     inputs:
       mode:
@@ -28,6 +33,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: fls-qt-roadmap
@@ -51,6 +57,7 @@ jobs:
         run: python -m unittest test_engine.py
       - name: Generate and deliver roadmap
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REPORT_MODE: ${{ inputs.mode || 'auto' }}
@@ -73,7 +80,8 @@ jobs:
               cron = os.environ['SCHEDULE_CRON']
               now = datetime.now(timezone.utc)
               hour = int(cron.split()[1])
-              nominal = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+              minute = int(cron.split()[0])
+              nominal = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
               if nominal > now:
                   nominal -= timedelta(days=1)
               # Recover the scheduled weekday even if a queued run starts after midnight.
@@ -85,6 +93,8 @@ jobs:
               if local.hour != target_hour:
                   print('Skipped inactive DST slot.')
                   sys.exit(0)
+              print('15-minute delivery verification' if minute == 15 else 'Primary scheduled delivery')
+              local = local.replace(minute=0)
               reports = []
               if target_hour == 15:
                   reports.append(('daily', (local.date() + timedelta(days=1)).isoformat()))
@@ -99,14 +109,26 @@ jobs:
                       reports.append(('daily', (local.date() + timedelta(days=2)).isoformat()))
               if not reports:
                   print('No report due in this slot.')
+          failures = []
           for mode, report_date in reports:
               args = [sys.executable, 'roadmap.py', '--mode', mode]
               if report_date:
                   args += ['--date', report_date]
               if os.environ['SEND'] == 'true':
                   args += ['--send']
-              subprocess.run(args, check=True)
+              if subprocess.run(args).returncode:
+                  failures.append((mode, report_date))
+          if failures:
+              raise SystemExit(f'Reports without confirmed delivery: {failures}')
           PYTHON
+      - name: Save Telegram delivery receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLS-QT-Delivery-Receipts
+          path: output/*.receipt.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Save generated images
         if: always()
         uses: actions/upload-artifact@v4
