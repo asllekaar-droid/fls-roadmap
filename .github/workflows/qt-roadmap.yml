@@ -15,6 +15,11 @@ on:
     - cron: '15 5 * * *'
     - cron: '15 19 * * 1-4'
     - cron: '15 20 * * 1-4'
+    # Preserve monthly/3M boundary reports at the new Sunday 18:00 MC anchor.
+    - cron: '0 22 * * 0'
+    - cron: '0 23 * * 0'
+    - cron: '15 22 * * 0'
+    - cron: '15 23 * * 0'
   workflow_dispatch:
     inputs:
       mode:
@@ -88,8 +93,11 @@ jobs:
               if hour in (19, 20):
                   while nominal.weekday() not in (0, 1, 2, 3):
                       nominal -= timedelta(days=1)
+              if hour in (22, 23):
+                  while nominal.weekday() != 6:
+                      nominal -= timedelta(days=1)
               local = nominal.astimezone(ZoneInfo('America/New_York'))
-              target_hour = 15 if hour in (19, 20) else 0
+              target_hour = 15 if hour in (19, 20) else (18 if hour in (22, 23) else 0)
               if local.hour != target_hour:
                   print('Skipped inactive DST slot.')
                   sys.exit(0)
@@ -104,7 +112,7 @@ jobs:
                   after = quarters(local)['MC']
                   if before in (4, 0) and after != before:
                       reports.append(('monthly', local.date().isoformat()))
-                  if local.weekday() == 5:
+                  if target_hour == 0 and local.weekday() == 5:
                       reports.append(('weekly', local.date().isoformat()))
                       reports.append(('daily', (local.date() + timedelta(days=2)).isoformat()))
               if not reports:

@@ -19,7 +19,7 @@ def at(day, hour=18):
 
 def month_anchor(day):
     first = day.replace(day=1)
-    return at(first + timedelta(days=(-first.weekday()) % 7))
+    return at(first + timedelta(days=(6-first.weekday()) % 7))
 
 
 def quarters(st):
@@ -29,7 +29,7 @@ def quarters(st):
     yearly = (st.month-1)//3 + 1
     anchor = month_anchor(st.date())
     week = (st.date()-anchor.date()).days//7
-    # The explicit user definition is Monday 18:00, not Sunday.
+    # User-approved MC anchor: first Sunday of the month at 18:00 New York.
     if st < anchor:
         mc = 0
     else:
@@ -151,7 +151,7 @@ def roadmap_caption(mode, day):
     elif mode == 'weekly':
         sunday = day + timedelta(days=(6-day.weekday()) % 7)
         start = at(sunday)
-        mc = mc_context(start + timedelta(days=1))
+        mc = mc_context(start)
         candidates = []
         previous = state('WC', start - timedelta(days=3))
         for i in range(5):
@@ -299,7 +299,7 @@ def weekly(day,path):
     # Upcoming Sunday following the report date; Saturday report -> next day.
     sunday=day+timedelta(days=(6-day.weekday())%7)
     start=at(sunday)
-    # MC context may change Monday 18:00 under the user's explicit anchor.
+    # MC and WC share the Sunday 18:00 weekly boundary.
     mc_nodes=[];groups=[];prev=state('WC',start-timedelta(days=3)) # prior Thu 18, Friday X
     for i in range(5):
         st=start+timedelta(days=i);w=state('WC',st)
@@ -309,14 +309,11 @@ def weekly(day,path):
             chosen=[x for x in dcs if x['s'] or (x['next_only'] and x['q']==1)]
             groups.append((w,chosen))
         prev=w
-    contexts=[state('MC',start),state('MC',start+timedelta(days=1))]
-    root=contexts[-1];root['start']=month_anchor((start+timedelta(days=1)).date())+timedelta(weeks=max(root['q']-1,0))
+    contexts=[state('MC',start)]
+    root=contexts[-1];root['start']=month_anchor(start.date())+timedelta(weeks=max(root['q']-1,0))
     h=max(1500,600+sum(max(350,len(dcs)*210+60) for _,dcs in groups))
     c=Canvas(h);c.header('WEEKLY ROADMAP / '+start.strftime('%d %b %Y').upper(),fmt(start)+' → '+fmt(start+timedelta(days=5))+' | NEW YORK | MC → WC → DC')
     c.circle(350,h//2,245,root,title=f"MC Q{root['q']}" if root['q'] else 'MC X = 0')
-    c.text(100,260,'MC anchor: first Monday 18:00 New York; Sunday context is separate.',21,MUTED)
-    if contexts[0]['q']!=contexts[1]['q']:
-        c.text(100,300,f"Sun WC Q1 starts in MC {contexts[0]['q']}; Monday 18:00 changes to MC {contexts[1]['q']}.",22,MUTED)
     if not groups:
         c.text(800,650,'No important WC or next-WC window this week.',32)
     y=380
@@ -372,7 +369,6 @@ def monthly(day,path):
     height=570+sum(heights)
     c=Canvas(height)
     c.header('MONTHLY ROADMAP / '+anchor.strftime('%B %Y').upper(),'NEW YORK | 3MONTHS / YEARLY → MC → IMPORTANT WC + NEXT WC')
-    c.text(100,265,'MC anchor retained: first Monday 18:00. Dates below use actual WC starts.',22,MUTED)
     c.circle(350,height//2,245,root,title=f"Yearly / 3M Q{root['q']}")
     y=370
     for (mc,hits),rh in zip(groups,heights):
