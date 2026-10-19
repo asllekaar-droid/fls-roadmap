@@ -2,14 +2,14 @@ name: FLS QT Roadmap
 
 on:
   schedule:
-    # Daily New York 18:00: DST-aware selection between the two UTC slots.
-    - cron: '0 22 * * *'
-    - cron: '0 23 * * *'
-    # New York midnight: calendar-month MC boundary checks.
+    # New York 00:00; active UTC slot follows DST.
+    # Saturday sends MC + upcoming Monday WC Q1.
+    # Other midnight runs preserve existing monthly boundary checks.
     - cron: '0 4 * * *'
     - cron: '0 5 * * *'
-    # Weekly Saturday 06:30 Tehran.
-    - cron: '0 3 * * 6'
+    # New York Monday-Thursday 15:00: next day's WC Q2/Q3/Q4/X.
+    - cron: '0 19 * * 1-4'
+    - cron: '0 20 * * 1-4'
   workflow_dispatch:
     inputs:
       mode:
@@ -68,42 +68,44 @@ jobs:
 
           mode = os.environ['REPORT_MODE']
           report_date = os.environ.get('REPORT_DATE', '').strip()
+          reports = [(mode, report_date)]
           if os.environ['EVENT_NAME'] == 'schedule':
               cron = os.environ['SCHEDULE_CRON']
               now = datetime.now(timezone.utc)
-              if cron == '0 3 * * 6':
-                  mode = 'weekly'
-                  report_date = datetime.now(ZoneInfo('Asia/Tehran')).date().isoformat()
+              hour = int(cron.split()[1])
+              nominal = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+              if nominal > now:
+                  nominal -= timedelta(days=1)
+              # Recover the scheduled weekday even if a queued run starts after midnight.
+              if hour in (19, 20):
+                  while nominal.weekday() not in (0, 1, 2, 3):
+                      nominal -= timedelta(days=1)
+              local = nominal.astimezone(ZoneInfo('America/New_York'))
+              target_hour = 15 if hour in (19, 20) else 0
+              if local.hour != target_hour:
+                  print('Skipped inactive DST slot.')
+                  sys.exit(0)
+              reports = []
+              if target_hour == 15:
+                  reports.append(('daily', (local.date() + timedelta(days=1)).isoformat()))
               else:
                   from roadmap import quarters
-                  hour = int(cron.split()[1])
-                  nominal = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-                  if nominal > now:
-                      nominal -= timedelta(days=1)
-                  local = nominal.astimezone(ZoneInfo('America/New_York'))
-                  target_hour = 18 if hour in (22, 23) else 0
-                  if local.hour != target_hour:
-                      print('Skipped inactive DST slot.')
-                      sys.exit(0)
                   before = quarters(local - timedelta(seconds=1))['MC']
                   after = quarters(local)['MC']
                   if before in (4, 0) and after != before:
-                      monthly_args = [sys.executable, 'roadmap.py', '--mode', 'monthly',
-                                      '--date', local.date().isoformat()]
-                      if os.environ['SEND'] == 'true':
-                          monthly_args += ['--send']
-                      subprocess.run(monthly_args, check=True)
-                  if local.hour != 18 or local.weekday() not in (6, 0, 1, 2, 3):
-                      print('No daily WC report for this slot.')
-                      sys.exit(0)
-                  mode = 'daily'
-                  report_date = (local.date() + timedelta(days=1)).isoformat()
-          args = [sys.executable, 'roadmap.py', '--mode', mode]
-          if report_date:
-              args += ['--date', report_date]
-          if os.environ['SEND'] == 'true':
-              args += ['--send']
-          subprocess.run(args, check=True)
+                      reports.append(('monthly', local.date().isoformat()))
+                  if local.weekday() == 5:
+                      reports.append(('weekly', local.date().isoformat()))
+                      reports.append(('daily', (local.date() + timedelta(days=2)).isoformat()))
+              if not reports:
+                  print('No report due in this slot.')
+          for mode, report_date in reports:
+              args = [sys.executable, 'roadmap.py', '--mode', mode]
+              if report_date:
+                  args += ['--date', report_date]
+              if os.environ['SEND'] == 'true':
+                  args += ['--send']
+              subprocess.run(args, check=True)
           PYTHON
       - name: Save generated images
         if: always()
