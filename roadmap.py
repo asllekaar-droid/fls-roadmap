@@ -400,12 +400,24 @@ def send(path,caption):
     if not token or not chat:
         raise SystemExit('Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID.')
     try:
+        destination=requests.get(f'https://api.telegram.org/bot{token}/getChat',params={'chat_id':chat},timeout=(15,30))
+        target=destination.json()
+        if destination.status_code!=200 or not target.get('ok'):
+            raise SystemExit('Telegram destination lookup failed; no photo sent.')
+        target=target['result']
+        if target.get('id') != -1003705572727 or target.get('type') != 'channel':
+            raise SystemExit('TELEGRAM_CHAT_ID does not resolve to the configured FLS channel; no photo sent.')
         with open(path,'rb') as photo:
             response=requests.post(f'https://api.telegram.org/bot{token}/sendPhoto',data={'chat_id':chat,'caption':caption},files={'photo':photo},timeout=(15,90))
         if response.status_code!=200:
             raise SystemExit(f'Telegram rejected photo (HTTP {response.status_code}). Check channel and permissions.')
-        if not response.json().get('ok'):
+        payload=response.json()
+        if not payload.get('ok'):
             raise SystemExit('Telegram did not confirm delivery.')
+        message=payload.get('result',{})
+        if message.get('chat',{}).get('id') != target['id'] or not message.get('message_id'):
+            raise SystemExit('Telegram response did not verify the intended channel and message.')
+        print(f"Verified Telegram channel: {target['id']}; message_id: {message['message_id']}")
     except requests.RequestException as error:
         raise SystemExit(f'Telegram connection error: {type(error).__name__}. Check the channel before retrying.') from None
     print('Photo delivered successfully.')
