@@ -127,7 +127,13 @@ def mc_context(st):
 
 def context_sentence(item, parent):
     name = '(' + cycle_label(item) + ')'
-    if item['s'] in ('S3', 'S6', 'S9'):
+    status = window_status(item)
+    if status == 'next':
+        previous = state(item['kind'], item['start'] - timedelta(seconds=1))
+        previous_name = '(' + cycle_label(previous) + ')'
+        return (f'چرخهٔ {name} پنجرهٔ NEXT بعد از چرخهٔ مهم {previous_name} است؛ '
+                f'بررسی SSMT بین این دو چرخه اهمیت دارد و کاندید تشکیل سقف یا کف {parent} است.')
+    if status == 'primary':
         return f'چرخهٔ {name} از نظر SXn مهم است؛ کاندید تشکیل سقف یا کف {parent} است.'
     return f'چرخهٔ {name} از نظر SXn مهم نیست؛ در این نقشه کاندید تشکیل سقف و کف {parent} نیست.'
 
@@ -138,7 +144,7 @@ def roadmap_caption(mode, day):
     if mode == 'daily':
         root, rows = day_data(day)
         mc = mc_context(root['start'])
-        if not mc['s'] and not root['s']:
+        if not window_status(mc) and not window_status(root):
             context = ('چرخه‌های (MC) و (WC) از نظر SXn مهم نیستند؛ بنابراین در این نقشه، '
                        '(MC) کاندید تشکیل سقف و کف ماه و (WC) کاندید تشکیل سقف و کف (MC) نیست.')
         else:
@@ -225,8 +231,8 @@ class Canvas:
         if r>220:
             lines=[(title,34,col,True),(label,52,col,True),
                    (' + '.join(map(str,item['values']))+' = '+str(sum(item['values'])),26,NAVY,False),
-                   (f"SSMT {item['kind']}" if item['s'] else 'TIME CONTEXT',24,NAVY,True),
-                   (pair(q) if item['s'] else (extra or ''),21,NAVY,False),
+                   (f"SSMT {item['kind']}" if status else 'TIME CONTEXT',24,NAVY,True),
+                   (pair(q) if item['s'] else (f'(Q{q-1}~Q{q})' if status == 'next' and q>1 else (extra or '')),21,NAVY,False),
                    (fmt(start),22,NAVY,False),(fmt(item.get('end',start+timedelta(hours=hours))),22,NAVY,False)]
             offsets=[-143,-87,-12,40,85,130,163]
         else:
@@ -436,4 +442,5 @@ def main():
         deliver(path,roadmap_caption(mode,day),send)
 
 if __name__=='__main__':main()
+
 
