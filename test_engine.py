@@ -1,8 +1,21 @@
 import unittest
 from datetime import date, timedelta
-from roadmap import at, quarters, classify, day_data, month_anchor
+from roadmap import at, quarters, classify, day_data, month_anchor, roadmap_caption, window_status, context_sentence, mc_context
 
 class TimeEngineTests(unittest.TestCase):
+    def test_next_caption_matches_highlighted_wc(self):
+        for day in [date(2026,10,21),date(2026,10,27)]:
+            root,_=day_data(day)
+            self.assertFalse(root['s'])
+            self.assertEqual(window_status(root),'next')
+            caption=roadmap_caption('daily',day)
+            self.assertIn('NEXT',caption)
+            self.assertIn('کاندید تشکیل سقف یا کف (MC) است',caption)
+            self.assertNotIn('(WC) کاندید تشکیل سقف و کف (MC) نیست',caption)
+        root,_=day_data(date(2026,10,28))
+        self.assertEqual(window_status(root),'')
+        self.assertNotIn('NEXT',context_sentence(root,'(MC)'))
+
     def test_friday_reference(self):
         root, rows = day_data(date(2026,10,16))
         self.assertEqual(root['q'],0)
@@ -43,3 +56,4 @@ class TimeEngineTests(unittest.TestCase):
             self.assertEqual([r['q'] for r in rows],[1,2,3,4])
 
 if __name__=='__main__':unittest.main()
+
