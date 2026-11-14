@@ -1,20 +1,43 @@
 import unittest
+from unittest.mock import patch
+import roadmap
 from datetime import date, timedelta
 from roadmap import at, quarters, classify, day_data, month_anchor, roadmap_caption, window_status, context_sentence, mc_context
 
 class TimeEngineTests(unittest.TestCase):
-    def test_next_caption_matches_highlighted_wc(self):
+    def test_next_is_not_important(self):
         for day in [date(2026,10,21),date(2026,10,27)]:
             root,_=day_data(day)
             self.assertFalse(root['s'])
-            self.assertEqual(window_status(root),'next')
-            caption=roadmap_caption('daily',day)
-            self.assertIn('NEXT',caption)
-            self.assertIn('کاندید تشکیل سقف یا کف (MC) است',caption)
-            self.assertNotIn('(WC) کاندید تشکیل سقف و کف (MC) نیست',caption)
-        root,_=day_data(date(2026,10,28))
-        self.assertEqual(window_status(root),'')
-        self.assertNotIn('NEXT',context_sentence(root,'(MC)'))
+            root['next_only']=True  # Legacy flags must not grant importance.
+            self.assertEqual(window_status(root),'')
+            self.assertNotIn('NEXT',roadmap_caption('daily',day))
+            self.assertIn('کاندید تشکیل سقف و کف (MC) نیست',context_sentence(root,'(MC)'))
+
+    def test_own_s_class_is_required(self):
+        for cls in ['', 'S3', 'S6', 'S9']:
+            self.assertEqual(bool(window_status({'s':cls})), bool(cls))
+        root,rows=day_data(date(2026,10,19))
+        self.assertEqual([r['q'] for r in rows if window_status(r)],[2])
+        self.assertTrue(all(not r['next_only'] for r in rows))
+        self.assertTrue(all(root['start'] <= hit['start'] < at(date(2026,10,19))
+                            for row in rows for hit in row['hits']))
+
+    def test_renderers_show_only_primary_cards(self):
+        for render,day in [(roadmap.daily,date(2026,10,27)),
+                           (roadmap.weekly,date(2026,10,24)),
+                           (roadmap.monthly,date(2026,10,1))]:
+            with self.subTest(render=render.__name__):
+                with patch.object(roadmap,'Canvas') as canvas:
+                    canvas.return_value.h=2000
+                    render(day,'unused.png')
+                    for call in canvas.return_value.card.call_args_list:
+                        title=call.args[3][0]
+                        self.assertTrue(any(s in title for s in ['S3','S6','S9']),title)
+                        self.assertNotIn('NEXT',title)
+                    for call in canvas.return_value.circle.call_args_list:
+                        item=call.args[3]
+                        self.assertEqual(bool(window_status(item)),item['s'] in ['S3','S6','S9'])
 
     def test_friday_reference(self):
         root, rows = day_data(date(2026,10,16))
@@ -26,7 +49,7 @@ class TimeEngineTests(unittest.TestCase):
         root,rows=day_data(date(2026,10,14))
         self.assertEqual(root['s'],'S9')
         self.assertEqual([r['s'] for r in rows],['S6','','','S9'])
-        self.assertTrue(rows[1]['next_only'])
+        self.assertFalse(rows[1]['next_only'])
     def test_month_anchor(self):
         self.assertEqual(month_anchor(date(2026,10,1)),at(date(2026,10,4)))
         self.assertEqual(quarters(at(date(2026,10,4))-timedelta(seconds=1))['MC'],0)
@@ -42,7 +65,7 @@ class TimeEngineTests(unittest.TestCase):
         self.assertEqual(rows[1]['values'],[3,1,2])
         self.assertEqual(rows[1]['s'],'S6')
         self.assertEqual([r['s'] for r in rows],['','S6','',''])
-        self.assertTrue(rows[2]['next_only'])
+        self.assertFalse(rows[2]['next_only'])
     def test_zero_class_and_yearly(self):
         self.assertEqual(classify([2,0,1],1),'S3')
         self.assertEqual(classify([4,2,0],0),'')

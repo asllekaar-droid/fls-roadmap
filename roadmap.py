@@ -65,26 +65,16 @@ def day_data(day):
     start = at(day-timedelta(days=1))
     root = state('WC', start)
     rows = []
-    prev = state('DC', start-timedelta(hours=6))
-    prior_important = bool(prev['s'])
     for dc in range(1,5):
         st = start+timedelta(hours=6*(dc-1))
         item = state('DC',st)
-        item['next_only'] = prior_important and not item['s']
-        prior_important = bool(item['s'])
+        item['next_only'] = False
         hits = []
         for q in range(1,5):
             ns = st+timedelta(minutes=90*(q-1))
             hit = state('90m',ns,q)
             if hit['s']:
                 hits.append(hit)
-        # Include a primary 90m from before the day if its next window starts here.
-        if dc == 1:
-            ps = start-timedelta(minutes=90)
-            ph = state('90m',ps,4)
-            if ph['s']:
-                ph['carry_in'] = True
-                hits.insert(0, ph)
         item['hits'] = hits
         rows.append(item)
     return root, rows
@@ -96,17 +86,12 @@ def fmt(st):
 
 def pair(q):
     left = f'Q{q-1}' if q>1 else 'prev Q4'
-    right = f'Q{q+1}' if q<4 else 'next Q1'
-    return f'({left}~Q{q}) + (Q{q}~{right})'
+    return f'({left}~Q{q})'
 
 
 def window_status(item):
-    if item['s'] in ('S3', 'S6', 'S9'):
-        return 'primary'
-    previous = state(item['kind'], item['start'] - timedelta(seconds=1))
-    if item.get('next_only') or (previous['s'] and previous['q'] != item['q']):
-        return 'next'
-    return ''
+    # Only this quarter's own SXn class determines importance.
+    return 'primary' if item['s'] in ('S3', 'S6', 'S9') else ''
 
 
 def cycle_label(item):
@@ -128,11 +113,6 @@ def mc_context(st):
 def context_sentence(item, parent):
     name = '(' + cycle_label(item) + ')'
     status = window_status(item)
-    if status == 'next':
-        previous = state(item['kind'], item['start'] - timedelta(seconds=1))
-        previous_name = '(' + cycle_label(previous) + ')'
-        return (f'چرخهٔ {name} پنجرهٔ NEXT بعد از چرخهٔ مهم {previous_name} است؛ '
-                f'بررسی SSMT بین این دو چرخه اهمیت دارد و کاندید تشکیل سقف یا کف {parent} است.')
     if status == 'primary':
         return f'چرخهٔ {name} از نظر SXn مهم است؛ کاندید تشکیل سقف یا کف {parent} است.'
     return f'چرخهٔ {name} از نظر SXn مهم نیست؛ در این نقشه کاندید تشکیل سقف و کف {parent} نیست.'
@@ -162,7 +142,7 @@ def roadmap_caption(mode, day):
         previous = state('WC', start - timedelta(days=3))
         for i in range(5):
             wc = state('WC', start + timedelta(days=i))
-            wc['next_only'] = bool(previous['s']) and not wc['s']
+            wc['next_only'] = False
             if window_status(wc):
                 candidates.append(cycle_label(wc))
             previous = wc
@@ -219,27 +199,27 @@ class Canvas:
         q=item['q'];col=COLORS[q]
         self.d.ellipse((x-r+6,y-r+10,x+r+6,y+r+10),fill='#DFEAEE')
         self.d.ellipse((x-r,y-r,x+r,y+r),fill='#F8FCFD',outline='white',width=8)
-        # Only primary S-Class and the following observation window get an arc.
+        # Only the quarter's own S3/S6/S9 class gets an importance arc.
         status = window_status(item)
-        item = dict(item, next_only=(status == 'next'))
+        item = dict(item, next_only=False)
         if status:
             self.d.arc((x-r+10,y-r+10,x+r-10,y+r-10),275,440,fill=col,width=4)
         # All rows constrained to the safe inner rectangle of the circle.
         title=title or f"{item['kind']} Q{q}" if q else title or f"{item['kind']} X = 0"
-        label=item['s'] or ('NEXT' if item.get('next_only') else 'CONTEXT')
+        label=item['s'] if status else 'CONTEXT'
         start=item['start'];hours={'MC':168,'WC':24,'DC':6,'3M':0}[item['kind']]
         if r>220:
             lines=[(title,34,col,True),(label,52,col,True),
                    (' + '.join(map(str,item['values']))+' = '+str(sum(item['values'])),26,NAVY,False),
                    (f"SSMT {item['kind']}" if status else 'TIME CONTEXT',24,NAVY,True),
-                   (pair(q) if item['s'] else (f'(Q{q-1}~Q{q})' if status == 'next' and q>1 else (extra or '')),21,NAVY,False),
+                   (pair(q) if status else (extra or ''),21,NAVY,False),
                    (fmt(start),22,NAVY,False),(fmt(item.get('end',start+timedelta(hours=hours))),22,NAVY,False)]
             offsets=[-143,-87,-12,40,85,130,163]
         else:
             lines=[(title,31,col,True),(label,34,col,True),
                    (' + '.join(map(str,item['values']))+' = '+str(sum(item['values'])),22,NAVY,False),
-                   (f"SSMT {item['kind']}" if item['s'] or item.get('next_only') else ('90m CONTEXT' if item['kind']=='DC' else 'WC CONTEXT'),20,NAVY,True),
-                   (pair(q) if item['s'] else (f'(Q{q-1}~Q{q})' if item.get('next_only') and q>1 else '(prev Q4~Q1)' if item.get('next_only') else ''),16,NAVY,False),
+                   (f"SSMT {item['kind']}" if status else ('90m CONTEXT' if item['kind']=='DC' else 'WC CONTEXT'),20,NAVY,True),
+                   (pair(q) if status else '',16,NAVY,False),
                    (fmt(start),18,NAVY,False),(fmt(item.get('end',start+timedelta(hours=hours))),18,NAVY,False)]
             offsets=[-110,-64,-15,24,58,88,115]
         for (t,s,c,b),off in zip(lines,offsets):
@@ -277,7 +257,7 @@ def daily(day,path):
     height=max(1760,350+sum(heights)+160)
     c=Canvas(height);c.header(day.strftime('%a %d %b %Y').upper()+' / WC ROADMAP',fmt(root['start'])+' → '+fmt(at(day))+' | NEW YORK | WC → DC → 90m')
     c.circle(350,(350+height-160)//2,245,root,title=day.strftime('%a')+f" | WC {'Q'+str(root['q']) if root['q'] else 'X = 0'}")
-    c.text(1240,278,'IMPORTANT 90m',24,bold=True);c.text(2000,278,'NEXT 90m / SSMT',24,bold=True)
+    c.text(1240,278,'IMPORTANT 90m / SXn',24,bold=True)
     y=350
     for item,rh in zip(rows,heights):
         cy=y+rh/2;c.arrow([(595,(350+height-160)//2),(660,(350+height-160)//2),(660,cy),(752,cy)])
@@ -289,15 +269,11 @@ def daily(day,path):
             c.arrow([(1088,cy),(1170,cy),(1170,sy+80),(1240,sy+80)])
             label=f"90m Q{q} / {hit['s']}"+(' / PREV DAY' if hit.get('carry_in') else '')
             prev=f'Q{q-1}' if q>1 else 'prev Q4'
-            c.card(1240,sy,680,[label,f'SSMT 90m ({prev}~Q{q})',fmt(st)+' – '+en.strftime('%H:%M'),
+            c.card(1240,sy,1440,[label,f'SSMT 90m ({prev}~Q{q})',fmt(st)+' – '+en.strftime('%H:%M'),
                        ' + '.join(map(str,hit['values']))+' = '+str(sum(hit['values']))],q)
-            c.arrow([(1920,sy+80),(1998,sy+80)])
-            c.card(2000,sy,680,[f'DC Q{nd} / 90m Q{nq} / NEXT',f'SSMT 90m (Q{q}~'+('next ' if q==4 else '')+f'Q{nq})',fmt(en)+' – '+ne.strftime('%H:%M'),''],nq)
         if not item['hits']:
             c.text(1250,cy,'No primary S3 / S6 / S9 in this DC.',25,MUTED)
         y+=rh
-    if rows[-1]['s']:
-        c.text(110,c.h-165,'DC Q4 → next DC Q1: '+fmt(at(day))+' – '+fmt(at(day)+timedelta(hours=6)),22,MUTED)
     c.save(path)
 
 
@@ -309,10 +285,10 @@ def weekly(day,path):
     mc_nodes=[];groups=[];prev=state('WC',start-timedelta(days=3)) # prior Thu 18, Friday X
     for i in range(5):
         st=start+timedelta(days=i);w=state('WC',st)
-        w['next_only']=bool(prev['s']) and not w['s']
-        if w['s'] or w['next_only']:
+        w['next_only']=False
+        if window_status(w):
             _,dcs=day_data(st.date()+timedelta(days=1))
-            chosen=[x for x in dcs if x['s'] or (x['next_only'] and x['q']==1)]
+            chosen=[x for x in dcs if window_status(x)]
             groups.append((w,chosen))
         prev=w
     contexts=[state('MC',start)]
@@ -321,7 +297,7 @@ def weekly(day,path):
     c=Canvas(h);c.header('WEEKLY ROADMAP / '+start.strftime('%d %b %Y').upper(),fmt(start)+' → '+fmt(start+timedelta(days=5))+' | NEW YORK | MC → WC → DC')
     c.circle(350,h//2,245,root,title=f"MC Q{root['q']}" if root['q'] else 'MC X = 0')
     if not groups:
-        c.text(800,650,'No important WC or next-WC window this week.',32)
+        c.text(800,650,'No S3 / S6 / S9 WC this week.',32)
     y=380
     for w,dcs in groups:
         rh=max(350,len(dcs)*210+60);cy=y+rh/2
@@ -332,10 +308,7 @@ def weekly(day,path):
             sy=cy-len(dcs)*210/2+i*210;st=dc['start'];en=st+timedelta(hours=6);ne=en+timedelta(hours=6);q=dc['q'];nq=q%4+1
             c.arrow([(1088,cy),(1170,cy),(1170,sy+80),(1240,sy+80)])
             prevq=f'Q{q-1}' if q>1 else 'prev Q4'
-            c.card(1240,sy,680,[f"DC Q{q} / {dc['s'] or 'NEXT DC'}",f'SSMT DC ({prevq}~Q{q})',fmt(st)+' – '+en.strftime('%H:%M'),' + '.join(map(str,dc['values']))+' = '+str(sum(dc['values']))],q)
-            if dc['s']:
-                c.arrow([(1920,sy+80),(1998,sy+80)])
-                c.card(2000,sy,680,[f'DC Q{nq} / NEXT',f'SSMT DC (Q{q}~'+('next ' if q==4 else '')+f'Q{nq})',fmt(en)+' – '+ne.strftime('%H:%M'),''],nq)
+            c.card(1240,sy,1440,[f"DC Q{q} / {dc['s']}",f'SSMT DC ({prevq}~Q{q})',fmt(st)+' – '+en.strftime('%H:%M'),' + '.join(map(str,dc['values']))+' = '+str(sum(dc['values']))],q)
         y+=rh
     c.save(path)
 
@@ -374,7 +347,7 @@ def monthly(day,path):
     heights=[max(355,len(hits)*205+60) for _,hits in groups]
     height=570+sum(heights)
     c=Canvas(height)
-    c.header('MONTHLY ROADMAP / '+anchor.strftime('%B %Y').upper(),'NEW YORK | 3MONTHS / YEARLY → MC → IMPORTANT WC + NEXT WC')
+    c.header('MONTHLY ROADMAP / '+anchor.strftime('%B %Y').upper(),'NEW YORK | 3MONTHS / YEARLY → MC → IMPORTANT WC')
     c.circle(350,height//2,245,root,title=f"Yearly / 3M Q{root['q']}")
     y=370
     for (mc,hits),rh in zip(groups,heights):
@@ -389,10 +362,7 @@ def monthly(day,path):
             dayname=(st.date()+timedelta(days=1)).strftime('%a')
             c.arrow([(1088,cy),(1170,cy),(1170,sy+80),(1240,sy+80)])
             left=f'Q{q-1}' if q>1 else 'prev X'
-            c.card(1240,sy,680,[f"{dayname} / WC Q{q} / {wc['s']}",f'SSMT WC ({left}~Q{q})',fmt(st)+' – '+fmt(en),' + '.join(map(str,wc['values']))+' = '+str(sum(wc['values']))],q)
-            c.arrow([(1920,sy+80),(1998,sy+80)])
-            nlabel=f'Q{nq}' if nq else 'X = 0'
-            c.card(2000,sy,680,[f'WC {nlabel} / NEXT',f'SSMT WC (Q{q}~{nlabel})',fmt(en)+' – '+fmt(ne),''],nq)
+            c.card(1240,sy,1440,[f"{dayname} / WC Q{q} / {wc['s']}",f'SSMT WC ({left}~Q{q})',fmt(st)+' – '+fmt(en),' + '.join(map(str,wc['values']))+' = '+str(sum(wc['values']))],q)
         y+=rh
     c.save(path)
 
